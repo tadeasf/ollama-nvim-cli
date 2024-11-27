@@ -1,104 +1,61 @@
-import asyncio
 import typer
-from pathlib import Path
-from typing import Optional
 from rich.console import Console
-from rich.prompt import Prompt
+from pathlib import Path
+import asyncio
+from typing import Optional
 from ollama_nvim_cli.lib.config import Config
-from ollama_nvim_cli.prompt.chat import ChatInterface
 from ollama_nvim_cli.lib.history import HistoryManager
+from ollama_nvim_cli.prompt.prompt import Prompt
 from ollama_nvim_cli.api.ollama import OllamaClient
-import sys
 
-app = typer.Typer(
-    name="ollama-nvim-cli",
-    help="A CLI tool for chatting with Ollama models using Neovim/LunarVim",
-    add_completion=False,
-)
+app = typer.Typer(help="Ollama Chat CLI")
 console = Console()
 
-
 @app.command()
-def chat(
-    model: str = typer.Option(
-        None, "--model", "-m", help="Specify the Ollama model to use"
-    ),
-    session: Optional[Path] = typer.Option(
-        None,
-        "--session",
-        "-s",
-        help="Path to an existing session file to continue",
-        exists=False,
-        dir_okay=False,
-        file_okay=True,
+def main(
+    model: Optional[str] = typer.Option(None, help="Model to use for chat"),
+    config_file: str = typer.Option(
+        "~/.config/ollama-nvim-cli/config.json",
+        help="Path to config file"
     ),
     list_sessions: bool = typer.Option(
-        False, "--list", "-l", help="List recent chat sessions"
+        False,
+        "--list-sessions",
+        "-l",
+        help="List recent chat sessions"
     ),
 ) -> None:
     """Start a chat session with an Ollama model"""
     try:
-        # Set the event loop policy
-        if sys.platform == "win32":
-            asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-        else:
-            asyncio.set_event_loop_policy(asyncio.DefaultEventLoopPolicy())
-
-        config = Config()
+        # Initialize config with expanded path
+        config = Config(str(Path(config_file).expanduser()))
+        
         if model:
-            config.config["model"] = model
+            config.set("model", model)
 
-        history_manager = HistoryManager(config.history_dir)
-
+        # Ensure history directory is created
+        history_dir = Path(config.get("history", {}).get("save_dir", "~/.local/share/ollama-nvim-cli/history")).expanduser()
+        history_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Pass the config object, not the Path object
+        history_manager = HistoryManager(config)
+        
         if list_sessions:
-            recent_sessions = history_manager.list_sessions()
-            if not recent_sessions:
+            sessions_table = history_manager.format_sessions()
+            if sessions_table:
+                console.print(sessions_table)
+            else:
                 console.print("[yellow]No previous sessions found[/yellow]")
-                raise typer.Exit()
+            return
 
-            console.print("\n[bold]Recent sessions:[/bold]")
-            for s in recent_sessions:
-                console.print(f"  • {s.name}")
-            raise typer.Exit()
-
-        ollama_client = OllamaClient(config.config["endpoint"], config.config["model"])
-
-        if session:
-            if not session.exists():
-                console.print(f"[red]Session file {session} not found[/red]")
-                raise typer.Exit(1)
-            messages = history_manager.load_session(str(session))
-            console.print(
-                f"[green]Loaded session with {len(messages)} messages[/green]"
-            )
-        else:
-            recent_sessions = history_manager.list_sessions()[:5]
-            if recent_sessions:
-                console.print("\n[bold]Recent sessions:[/bold]")
-                for i, s in enumerate(recent_sessions, 1):
-                    console.print(f"{i}. {s.name}")
-
-                choice = Prompt.ask(
-                    "\nSelect a session to continue (or press Enter for new session)",
-                    default="",
-                )
-
-                if choice.isdigit() and 0 < int(choice) <= len(recent_sessions):
-                    session = recent_sessions[int(choice) - 1]
-                    messages = history_manager.load_session(str(session))
-                    console.print(
-                        f"[green]Loaded session with {len(messages)} messages[/green]"
-                    )
-
-        chat_interface = ChatInterface(config.config, history_manager, ollama_client)
-
-        # Run the async chat loop
-        asyncio.run(chat_interface.chat_loop())
+        ollama_client = OllamaClient(config)
+        prompt = Prompt(config, history_manager, ollama_client)
+        
+        asyncio.run(prompt.chat_loop())
 
     except Exception as e:
         console.print(f"[red]Error: {str(e)}[/red]")
         raise typer.Exit(1)
-
 
 if __name__ == "__main__":
     app()

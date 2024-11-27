@@ -3,11 +3,14 @@ from datetime import datetime
 from typing import List, Optional
 import yaml
 from prompt_toolkit.history import FileHistory
+from rich.table import Table
 
 
 class HistoryManager:
-    def __init__(self, history_dir: Path):
+    def __init__(self, config):
+        history_dir = Path(config.get("history", {}).get("save_dir", "~/.local/share/ollama-nvim-cli/history")).expanduser()
         self.history_dir = history_dir
+        self.history_dir.mkdir(parents=True, exist_ok=True)
         self.current_session: Optional[str] = None
         self.prompt_history = FileHistory(str(history_dir / ".prompt_history"))
         self.messages: List[dict] = []
@@ -80,8 +83,36 @@ class HistoryManager:
 
     def list_sessions(self) -> List[Path]:
         """List all available sessions"""
-        return sorted(
+        sessions = sorted(
             self.history_dir.glob("chat_session_*.md"),
             key=lambda p: p.stat().st_mtime,
             reverse=True,
         )
+        return sessions[:5]  # Return only the 5 most recent sessions
+
+    def format_sessions(self) -> None:
+        """Format and display recent sessions"""
+        sessions = self.list_sessions()
+        if not sessions:
+            return
+
+        table = Table(title="Recent Sessions", show_header=True, border_style="cyan")
+        table.add_column("№", style="cyan", justify="right")
+        table.add_column("Date", style="green")
+        table.add_column("Size", style="yellow")
+
+        for i, session_path in enumerate(sessions, 1):
+            # Parse date from filename (format: chat_session_YYYYMMDD_HHMMSS.md)
+            date_str = session_path.stem.split("_")[2]  # Gets YYYYMMDD
+            date = datetime.strptime(date_str, "%Y%m%d").strftime("%d/%m/%Y")
+            
+            # Get character count
+            try:
+                char_count = len(session_path.read_text())
+                size_str = f"{char_count:,} characters"
+            except Exception:
+                size_str = "N/A"
+
+            table.add_row(str(i), date, size_str)
+
+        return table

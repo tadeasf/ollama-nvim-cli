@@ -41,6 +41,7 @@ ollama-nvim-cli --list
 ```
 
 Available options:
+
 - `--model, -m`: Specify the Ollama model to use
 - `--session, -s`: Continue a previous chat session
 - `--list, -l`: List recent chat sessions
@@ -51,11 +52,13 @@ Available options:
 ### Setup Development Environment
 
 1. Install Rye (if not already installed):
+
 ```bash
 curl -sSf https://rye-up.com/get | bash
 ```
 
 2. Clone and setup project:
+
 ```bash
 git clone https://github.com/yourusername/ollama-nvim-cli
 cd ollama-nvim-cli

@@ -2,16 +2,31 @@ import httpx
 import asyncio
 from typing import List, Dict, AsyncGenerator
 import json
+from ..lib.config import Config
 
 
 class OllamaClient:
-    def __init__(self, endpoint: str, model: str):
-        self.endpoint = endpoint
-        if ":" not in model and "/" not in model:
-            self.model = f"{model}:latest"
-        else:
-            self.model = model
-        self.client = httpx.AsyncClient(base_url=endpoint)
+    def __init__(self, config: Config):
+        """Initialize Ollama client with config"""
+        self.config = config
+        self.model = config.get("model")
+        
+        if not self.model:
+            # Prompt user for model if not set
+            from rich.prompt import Prompt
+            available_models = ["qwen2.5-coder:latest", "mistral:latest", "llama2:latest"]
+            self.model = Prompt.ask(
+                "Choose a model",
+                choices=available_models,
+                default="qwen2.5-coder:latest"
+            )
+            # Save to config
+            self.config.set("model", self.model)
+        
+        ollama_config = config.get("ollama", {})
+        self.host = ollama_config.get("host", "http://localhost:11434")
+        self.timeout = ollama_config.get("timeout", 30)
+        self.client = httpx.AsyncClient(base_url=self.host)
         self._lock = asyncio.Lock()
 
     async def __aenter__(self):
@@ -35,7 +50,7 @@ class OllamaClient:
 
     @property
     def generate_url(self) -> str:
-        return f"{self.endpoint}/api/generate"
+        return f"{self.host}/api/generate"
 
     async def generate(self, prompt: str) -> AsyncGenerator[str, None]:
         data = {
@@ -52,7 +67,7 @@ class OllamaClient:
         try:
             async with self._lock:
                 async with self.client.stream(
-                    "POST", self.generate_url, json=data, timeout=30.0
+                    "POST", self.generate_url, json=data, timeout=self.timeout
                 ) as response:
                     response.raise_for_status()
                     async for line in response.aiter_lines():
